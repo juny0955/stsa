@@ -1,3 +1,3 @@
 rootProject.name = "stsa"
 
-include(":collector")
+include(":collector", ":persistence")

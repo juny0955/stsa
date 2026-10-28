@@ -11,6 +11,9 @@ spring:
   jooq:
     sql-dialect: postgres
 
+  flyway:
+    enabled: false
+
 finnhub:
   api-key: ${FINNHUB_API_KEY:}
   base-url: https://finnhub.io/api/v1
