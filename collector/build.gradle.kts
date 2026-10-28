@@ -39,3 +39,7 @@ dependencies {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
+
+tasks.bootRun {
+    workingDir = rootProject.projectDir
+}

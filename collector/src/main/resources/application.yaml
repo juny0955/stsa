@@ -1,3 +1,17 @@
 spring:
+  config:
+    import: "optional:file:.env[.properties]"
   application:
     name: collector
+  datasource:
+    url: jdbc:postgresql://localhost:5432/stsa
+    username: postgres
+    password: postgres
+
+  jooq:
+    sql-dialect: postgres
+
+finnhub:
+  api-key: ${FINNHUB_API_KEY:}
+  base-url: https://finnhub.io/api/v1
+  request-timeout: 10s

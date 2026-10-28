@@ -3,6 +3,10 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
+# Local environment
+.env
+.env.*
+
 # IDE
 .idea/
 *.iws
