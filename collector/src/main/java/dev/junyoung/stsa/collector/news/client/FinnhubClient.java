@@ -11,7 +11,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import dev.junyoung.stsa.collector.config.FinnhubProperties;
 import dev.junyoung.stsa.collector.news.client.dto.FinnhubResponse;
 import dev.junyoung.stsa.collector.news.domain.CompanyNews;
-import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 
 @Component
@@ -43,7 +42,7 @@ public class FinnhubClient {
 			}
 
 			return Flux.fromIterable(SYMBOLS)
-				.concatMap(symbol -> webClient.get()
+				.flatMap(symbol -> webClient.get()
 					.uri(uriBuilder -> uriBuilder.path("/company-news")
 						.queryParam("symbol", symbol)
 						.queryParam("from", from)
@@ -54,7 +53,7 @@ public class FinnhubClient {
 					.bodyToFlux(FinnhubResponse.class)
 					.collectList()
 					.timeout(properties.requestTimeout())
-					.map(articles -> new CompanyNews(symbol, articles)));
+					.map(articles -> new CompanyNews(symbol, articles)), 3);
 		});
 	}
 }
