@@ -11,7 +11,9 @@ import org.springframework.web.reactive.function.client.WebClient;
 import dev.junyoung.stsa.collector.config.FinnhubProperties;
 import dev.junyoung.stsa.collector.news.client.dto.FinnhubResponse;
 import dev.junyoung.stsa.collector.news.domain.CompanyNews;
+import dev.junyoung.stsa.collector.news.domain.NewsFetchResult;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 @Component
 public class FinnhubClient {
@@ -29,7 +31,7 @@ public class FinnhubClient {
 				.build();
 	}
 
-	public Flux<CompanyNews> fetchCompanyNews(LocalDate from, LocalDate to) {
+	public Flux<NewsFetchResult> fetchCompanyNews(LocalDate from, LocalDate to) {
 		Objects.requireNonNull(from, "from must not be null");
 		Objects.requireNonNull(to, "to must not be null");
 		if (from.isAfter(to)) {
@@ -53,7 +55,9 @@ public class FinnhubClient {
 					.bodyToFlux(FinnhubResponse.class)
 					.collectList()
 					.timeout(properties.requestTimeout())
-					.map(articles -> new CompanyNews(symbol, articles)), 3);
+					.<NewsFetchResult>map(articles ->
+							new NewsFetchResult.Success(new CompanyNews(symbol, articles)))
+					.onErrorResume(error -> Mono.just(new NewsFetchResult.Failure(symbol, error))), 3);
 		});
 	}
 }

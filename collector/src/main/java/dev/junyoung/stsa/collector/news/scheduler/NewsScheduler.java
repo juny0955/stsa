@@ -2,12 +2,14 @@ package dev.junyoung.stsa.collector.news.scheduler;
 
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import dev.junyoung.stsa.collector.news.client.FinnhubClient;
+import dev.junyoung.stsa.collector.news.domain.NewsFetchResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -22,9 +24,25 @@ public class NewsScheduler {
 	@Scheduled(fixedRateString = "${finnhub.news.interval:PT30M}", initialDelay = 0)
 	public void collectNews() {
 		LocalDate today = LocalDate.now(ZoneOffset.UTC);
+		AtomicInteger succeeded = new AtomicInteger();
+		AtomicInteger failed = new AtomicInteger();
 		try {
 			client.fetchCompanyNews(today.minusDays(1), today)
-				.doOnNext(company -> log.info("{} 뉴스 {}건 조회 완료", company.symbol(), company.articles().size()))
+				.doOnNext(result -> {
+					switch (result) {
+						case NewsFetchResult.Success success -> {
+							succeeded.incrementAndGet();
+							log.info("{} 뉴스 {}건 조회 완료", success.symbol(), success.news().articles().size());
+						}
+						case NewsFetchResult.Failure failure -> {
+							failed.incrementAndGet();
+							log.error("Finnhub {} 뉴스 조회 실패",
+									failure.symbol(), failure.cause());
+						}
+					}
+				})
+				.doOnComplete(() -> log.info("Finnhub 뉴스 수집 완료: 성공 {}종목, 실패 {}종목",
+						succeeded.get(), failed.get()))
 				.blockLast();
 		} catch (RuntimeException e) {
 			log.error("뉴스 조회 실패. 다음 주기에 다시 시도합니다.", e);
