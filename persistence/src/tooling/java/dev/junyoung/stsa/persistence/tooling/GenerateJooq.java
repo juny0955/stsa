@@ -34,7 +34,7 @@ public final class GenerateJooq {
 						.withDatabase(new Database()
 								.withName("org.jooq.meta.postgres.PostgresDatabase")
 								.withInputSchema("public")
-								.withIncludes("stock|news_article|news_article_stock"))
+								.withExcludes("flyway_schema_history"))
 						.withGenerate(new Generate()
 								.withDaos(false)
 								.withPojos(false)

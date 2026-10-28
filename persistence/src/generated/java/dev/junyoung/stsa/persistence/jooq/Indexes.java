@@ -4,6 +4,7 @@
 package dev.junyoung.stsa.persistence.jooq;
 
 
+import dev.junyoung.stsa.persistence.jooq.tables.JobExecution;
 import dev.junyoung.stsa.persistence.jooq.tables.NewsArticle;
 import dev.junyoung.stsa.persistence.jooq.tables.NewsArticleStock;
 
@@ -23,6 +24,7 @@ public class Indexes {
     // INDEX definitions
     // -------------------------------------------------------------------------
 
+    public static final Index JOB_EXECUTION_JOB_STARTED_IDX = Internal.createIndex(DSL.name("job_execution_job_started_idx"), JobExecution.JOB_EXECUTION, new OrderField[] { JobExecution.JOB_EXECUTION.JOB_NAME, JobExecution.JOB_EXECUTION.STARTED_AT.desc() }, false);
     public static final Index NEWS_ARTICLE_PUBLISHED_AT_ID_IDX = Internal.createIndex(DSL.name("news_article_published_at_id_idx"), NewsArticle.NEWS_ARTICLE, new OrderField[] { NewsArticle.NEWS_ARTICLE.PUBLISHED_AT.desc(), NewsArticle.NEWS_ARTICLE.ID.desc() }, false);
     public static final Index NEWS_ARTICLE_STOCK_STOCK_ARTICLE_IDX = Internal.createIndex(DSL.name("news_article_stock_stock_article_idx"), NewsArticleStock.NEWS_ARTICLE_STOCK, new OrderField[] { NewsArticleStock.NEWS_ARTICLE_STOCK.STOCK_ID, NewsArticleStock.NEWS_ARTICLE_STOCK.ARTICLE_ID }, false);
 }

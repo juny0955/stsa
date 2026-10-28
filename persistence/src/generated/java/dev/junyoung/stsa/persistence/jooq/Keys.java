@@ -4,9 +4,11 @@
 package dev.junyoung.stsa.persistence.jooq;
 
 
+import dev.junyoung.stsa.persistence.jooq.tables.JobExecution;
 import dev.junyoung.stsa.persistence.jooq.tables.NewsArticle;
 import dev.junyoung.stsa.persistence.jooq.tables.NewsArticleStock;
 import dev.junyoung.stsa.persistence.jooq.tables.Stock;
+import dev.junyoung.stsa.persistence.jooq.tables.records.JobExecutionRecord;
 import dev.junyoung.stsa.persistence.jooq.tables.records.NewsArticleRecord;
 import dev.junyoung.stsa.persistence.jooq.tables.records.NewsArticleStockRecord;
 import dev.junyoung.stsa.persistence.jooq.tables.records.StockRecord;
@@ -30,6 +32,7 @@ public class Keys {
     // UNIQUE and PRIMARY KEY definitions
     // -------------------------------------------------------------------------
 
+    public static final UniqueKey<JobExecutionRecord> JOB_EXECUTION_PKEY = Internal.createUniqueKey(JobExecution.JOB_EXECUTION, DSL.name("job_execution_pkey"), new TableField[] { JobExecution.JOB_EXECUTION.ID }, true);
     public static final UniqueKey<NewsArticleRecord> NEWS_ARTICLE_PKEY = Internal.createUniqueKey(NewsArticle.NEWS_ARTICLE, DSL.name("news_article_pkey"), new TableField[] { NewsArticle.NEWS_ARTICLE.ID }, true);
     public static final UniqueKey<NewsArticleRecord> NEWS_ARTICLE_PROVIDER_EXTERNAL_ID_UK = Internal.createUniqueKey(NewsArticle.NEWS_ARTICLE, DSL.name("news_article_provider_external_id_uk"), new TableField[] { NewsArticle.NEWS_ARTICLE.PROVIDER, NewsArticle.NEWS_ARTICLE.EXTERNAL_ID }, true);
     public static final UniqueKey<NewsArticleStockRecord> NEWS_ARTICLE_STOCK_PK = Internal.createUniqueKey(NewsArticleStock.NEWS_ARTICLE_STOCK, DSL.name("news_article_stock_pk"), new TableField[] { NewsArticleStock.NEWS_ARTICLE_STOCK.ARTICLE_ID, NewsArticleStock.NEWS_ARTICLE_STOCK.STOCK_ID }, true);

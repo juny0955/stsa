@@ -4,6 +4,7 @@
 package dev.junyoung.stsa.persistence.jooq;
 
 
+import dev.junyoung.stsa.persistence.jooq.tables.JobExecution;
 import dev.junyoung.stsa.persistence.jooq.tables.NewsArticle;
 import dev.junyoung.stsa.persistence.jooq.tables.NewsArticleStock;
 import dev.junyoung.stsa.persistence.jooq.tables.Stock;
@@ -14,6 +15,11 @@ import dev.junyoung.stsa.persistence.jooq.tables.Stock;
  */
 @SuppressWarnings({ "all", "unchecked", "rawtypes", "this-escape" })
 public class Tables {
+
+    /**
+     * The table <code>public.job_execution</code>.
+     */
+    public static final JobExecution JOB_EXECUTION = JobExecution.JOB_EXECUTION;
 
     /**
      * The table <code>public.news_article</code>.

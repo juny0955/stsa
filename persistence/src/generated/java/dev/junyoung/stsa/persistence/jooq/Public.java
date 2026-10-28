@@ -4,6 +4,7 @@
 package dev.junyoung.stsa.persistence.jooq;
 
 
+import dev.junyoung.stsa.persistence.jooq.tables.JobExecution;
 import dev.junyoung.stsa.persistence.jooq.tables.NewsArticle;
 import dev.junyoung.stsa.persistence.jooq.tables.NewsArticleStock;
 import dev.junyoung.stsa.persistence.jooq.tables.Stock;
@@ -29,6 +30,11 @@ public class Public extends SchemaImpl {
      * The reference instance of <code>public</code>
      */
     public static final Public PUBLIC = new Public();
+
+    /**
+     * The table <code>public.job_execution</code>.
+     */
+    public final JobExecution JOB_EXECUTION = JobExecution.JOB_EXECUTION;
 
     /**
      * The table <code>public.news_article</code>.
@@ -61,6 +67,7 @@ public class Public extends SchemaImpl {
     @Override
     public final List<Table<?>> getTables() {
         return Arrays.asList(
+            JobExecution.JOB_EXECUTION,
             NewsArticle.NEWS_ARTICLE,
             NewsArticleStock.NEWS_ARTICLE_STOCK,
             Stock.STOCK
