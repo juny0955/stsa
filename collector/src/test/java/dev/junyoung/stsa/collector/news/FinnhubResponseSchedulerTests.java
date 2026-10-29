@@ -25,6 +25,7 @@ import dev.junyoung.stsa.collector.news.client.FinnhubClient;
 import dev.junyoung.stsa.collector.domain.CompanyNews;
 import dev.junyoung.stsa.collector.domain.JobExecution;
 import dev.junyoung.stsa.collector.service.JobExecutionService;
+import dev.junyoung.stsa.collector.service.NewsPersistenceService;
 import dev.junyoung.stsa.collector.news.client.dto.FinnhubResponse;
 import dev.junyoung.stsa.collector.scheduler.NewsScheduler;
 import reactor.core.publisher.Flux;
@@ -51,11 +52,13 @@ class FinnhubResponseSchedulerTests {
 	private static final Duration TEST_TIMEOUT = Duration.ofSeconds(5);
 
 	private JobExecutionService jobExecutionService;
+	private NewsPersistenceService newsPersistenceService;
 	private JobExecution startedExecution;
 
 	@BeforeEach
 	void setUp() {
 		jobExecutionService = mock(JobExecutionService.class);
+		newsPersistenceService = mock(NewsPersistenceService.class);
 		startedExecution = JobExecution.builder()
 				.jobName("News Collect")
 				.processedCount(3)
@@ -151,7 +154,7 @@ class FinnhubResponseSchedulerTests {
 				new NewsFetchResult.Success(new CompanyNews("NVDA", List.of(article))),
 				success("AAPL"), success("MSFT")));
 
-		new NewsScheduler(jobExecutionService, client).collectNews();
+		new NewsScheduler(jobExecutionService, newsPersistenceService, client).collectNews();
 
 		verify(jobExecutionService).finish(startedExecution, 3, 0, null);
 	}
@@ -164,7 +167,7 @@ class FinnhubResponseSchedulerTests {
 		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.just(
 				success("AAPL"), new NewsFetchResult.Failure("NVDA", cause), success("MSFT")));
 
-		new NewsScheduler(jobExecutionService, client).collectNews();
+		new NewsScheduler(jobExecutionService, newsPersistenceService, client).collectNews();
 
 		verify(jobExecutionService).finish(startedExecution, 2, 1, null);
 	}
@@ -179,7 +182,7 @@ class FinnhubResponseSchedulerTests {
 				new NewsFetchResult.Failure("AAPL", cause),
 				new NewsFetchResult.Failure("MSFT", cause)));
 
-		new NewsScheduler(jobExecutionService, client).collectNews();
+		new NewsScheduler(jobExecutionService, newsPersistenceService, client).collectNews();
 
 		verify(jobExecutionService).finish(startedExecution, 0, 3, null);
 	}
@@ -194,7 +197,7 @@ class FinnhubResponseSchedulerTests {
 						new NewsFetchResult.Failure("AAPL", cause),
 						new NewsFetchResult.Failure("MSFT", cause)))
 				.thenReturn(Flux.just(success("NVDA"), success("AAPL"), success("MSFT")));
-		NewsScheduler scheduler = new NewsScheduler(jobExecutionService, client);
+		NewsScheduler scheduler = new NewsScheduler(jobExecutionService, newsPersistenceService, client);
 
 		scheduler.collectNews();
 		scheduler.collectNews();
@@ -210,7 +213,7 @@ class FinnhubResponseSchedulerTests {
 		FinnhubClient client = mock(FinnhubClient.class);
 		Sinks.Many<NewsFetchResult> source = Sinks.many().unicast().onBackpressureBuffer();
 		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(source.asFlux());
-		NewsScheduler scheduler = new NewsScheduler(jobExecutionService, client);
+		NewsScheduler scheduler = new NewsScheduler(jobExecutionService, newsPersistenceService, client);
 		ExecutorService executor = Executors.newSingleThreadExecutor();
 		Future<?> execution = executor.submit(scheduler::collectNews);
 
@@ -245,6 +248,7 @@ class FinnhubResponseSchedulerTests {
 		return new ApplicationContextRunner()
 				.withUserConfiguration(SchedulingConfiguration.class)
 				.withBean(JobExecutionService.class, () -> jobExecutionService)
+				.withBean(NewsPersistenceService.class, () -> newsPersistenceService)
 				.withBean(FinnhubClient.class, () -> client);
 	}
 

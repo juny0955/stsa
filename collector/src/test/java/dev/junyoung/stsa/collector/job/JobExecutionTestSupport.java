@@ -24,8 +24,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import dev.junyoung.stsa.collector.CollectorApplication;
 import dev.junyoung.stsa.collector.repository.JobExecutionRepository;
 import dev.junyoung.stsa.collector.service.JobExecutionService;
+import dev.junyoung.stsa.collector.service.NewsPersistenceService;
 
-import static dev.junyoung.stsa.persistence.jooq.Tables.JOB_EXECUTION;
+import static dev.junyoung.stsa.persistence.jooq.Tables.STOCK;
 
 @SpringBootTest(classes = CollectorApplication.class, properties = "finnhub.news.enabled=false")
 @Import(JobExecutionTestSupport.DatabaseConfig.class)
@@ -36,6 +37,8 @@ abstract class JobExecutionTestSupport {
 	JobExecutionService service;
 	@Autowired
 	JobExecutionRepository repository;
+	@Autowired
+	NewsPersistenceService newsPersistenceService;
 	@Autowired
 	DSLContext sql;
 	@Autowired
@@ -50,7 +53,7 @@ abstract class JobExecutionTestSupport {
 
 	@BeforeEach
 	void resetDatabaseAndOpenObserver() throws SQLException {
-		sql.truncate(JOB_EXECUTION).restartIdentity().execute();
+		sql.execute("TRUNCATE news_article_stock, news_article, stock, job_execution RESTART IDENTITY");
 		observerConnection = dataSource.getConnection();
 		observer = DSL.using(observerConnection, SQLDialect.POSTGRES);
 	}
@@ -60,6 +63,10 @@ abstract class JobExecutionTestSupport {
 		if (observerConnection != null) {
 			observerConnection.close();
 		}
+	}
+
+	long registerStock(String symbol) {
+		return sql.insertInto(STOCK).set(STOCK.SYMBOL, symbol).returningResult(STOCK.ID).fetchSingle().value1();
 	}
 
 	@TestConfiguration(proxyBeanMethods = false)
