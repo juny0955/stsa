@@ -10,15 +10,13 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import dev.junyoung.stsa.collector.config.FinnhubProperties;
 import dev.junyoung.stsa.collector.news.client.dto.FinnhubResponse;
-import dev.junyoung.stsa.collector.news.domain.CompanyNews;
-import dev.junyoung.stsa.collector.news.domain.NewsFetchResult;
+import dev.junyoung.stsa.collector.domain.CompanyNews;
+import dev.junyoung.stsa.collector.news.NewsFetchResult;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Component
 public class FinnhubClient {
-
-	private static final List<String> SYMBOLS = List.of("NVDA", "AAPL", "MSFT");
 
 	private final WebClient webClient;
 	private final FinnhubProperties properties;
@@ -31,7 +29,8 @@ public class FinnhubClient {
 				.build();
 	}
 
-	public Flux<NewsFetchResult> fetchCompanyNews(LocalDate from, LocalDate to) {
+	public Flux<NewsFetchResult> fetchCompanyNews(List<String> symbols, LocalDate from, LocalDate to) {
+		Objects.requireNonNull(symbols, "symbols must not be null");
 		Objects.requireNonNull(from, "from must not be null");
 		Objects.requireNonNull(to, "to must not be null");
 		if (from.isAfter(to)) {
@@ -43,7 +42,7 @@ public class FinnhubClient {
 				return Flux.error(new IllegalStateException("FINNHUB_API_KEY must be configured"));
 			}
 
-			return Flux.fromIterable(SYMBOLS)
+			return Flux.fromIterable(symbols)
 				.flatMap(symbol -> webClient.get()
 					.uri(uriBuilder -> uriBuilder.path("/company-news")
 						.queryParam("symbol", symbol)

@@ -45,12 +45,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.junyoung.stsa.collector.config.FinnhubProperties;
 import dev.junyoung.stsa.collector.news.client.FinnhubClient;
 import dev.junyoung.stsa.collector.news.client.dto.FinnhubResponse;
-import dev.junyoung.stsa.collector.news.domain.CompanyNews;
-import dev.junyoung.stsa.collector.news.domain.NewsFetchResult;
+import dev.junyoung.stsa.collector.domain.CompanyNews;
 
 @DisplayName("Finnhub 뉴스 클라이언트")
 class FinnhubClientTests {
 
+	private static final List<String> SYMBOLS = List.of("NVDA", "AAPL", "MSFT");
 	private static final LocalDate FROM = LocalDate.of(2026, 10, 27);
 	private static final LocalDate TO = LocalDate.of(2026, 10, 28);
 	private static final Duration TEST_TIMEOUT = Duration.ofSeconds(5);
@@ -129,7 +129,7 @@ class FinnhubClientTests {
 			responses.put(symbol, new Response(200, "[]", new CountDownLatch(1)));
 		}
 		BlockingQueue<String> emittedSymbols = new LinkedBlockingQueue<>();
-		CompletableFuture<List<NewsFetchResult>> result = client.fetchCompanyNews(FROM, TO)
+		CompletableFuture<List<NewsFetchResult>> result = client.fetchCompanyNews(SYMBOLS, FROM, TO)
 				.doOnNext(company -> emittedSymbols.add(company.symbol()))
 				.collectList().toFuture();
 
@@ -159,7 +159,7 @@ class FinnhubClientTests {
 			responses.put(symbol, new Response(200, "[]"));
 		}
 
-		List<NewsFetchResult> result = client.fetchCompanyNews(TO, TO).collectList().block(TEST_TIMEOUT);
+		List<NewsFetchResult> result = client.fetchCompanyNews(SYMBOLS, TO, TO).collectList().block(TEST_TIMEOUT);
 
 		assertResults(result);
 		assertThat(result).allSatisfy(item ->
@@ -191,7 +191,7 @@ class FinnhubClientTests {
 		responses.put("AAPL", new Response(429, "{\"error\":\"Rate limit exceeded\"}", new CountDownLatch(1)));
 		responses.put("MSFT", new Response(200, "[]", new CountDownLatch(1)));
 		BlockingQueue<String> emittedSymbols = new LinkedBlockingQueue<>();
-		CompletableFuture<List<NewsFetchResult>> result = client.fetchCompanyNews(FROM, TO)
+		CompletableFuture<List<NewsFetchResult>> result = client.fetchCompanyNews(SYMBOLS, FROM, TO)
 				.doOnNext(company -> emittedSymbols.add(company.symbol()))
 				.collectList().toFuture();
 
@@ -233,7 +233,7 @@ class FinnhubClientTests {
 		client = new FinnhubClient(builder,
 				new FinnhubProperties("https://example.com/api/v1", "test-api-key", Duration.ofSeconds(3)));
 		BlockingQueue<NewsFetchResult> emittedResults = new LinkedBlockingQueue<>();
-		CompletableFuture<List<NewsFetchResult>> result = client.fetchCompanyNews(FROM, TO)
+		CompletableFuture<List<NewsFetchResult>> result = client.fetchCompanyNews(SYMBOLS, FROM, TO)
 				.doOnNext(emittedResults::add).collectList().toFuture();
 
 		try {
@@ -274,7 +274,7 @@ class FinnhubClientTests {
 	@Test
 	@DisplayName("시작일이 종료일보다 늦으면 HTTP 요청 전에 실패한다")
 	void rejectsReversedDateRangeBeforeSendingRequests() {
-		assertThatThrownBy(() -> client.fetchCompanyNews(TO, FROM))
+		assertThatThrownBy(() -> client.fetchCompanyNews(SYMBOLS, TO, FROM))
 				.isInstanceOf(IllegalArgumentException.class)
 				.hasMessage("from must be on or before to");
 		assertThat(requests).isEmpty();
@@ -364,7 +364,7 @@ class FinnhubClientTests {
 		responses.put("NVDA", new Response(429, "{\"error\":\"Rate limited\"}"));
 		responses.put("AAPL", new Response(200, "[]"));
 		responses.put("MSFT", new Response(200, "[]"));
-		Flux<NewsFetchResult> collection = client.fetchCompanyNews(FROM, TO);
+		Flux<NewsFetchResult> collection = client.fetchCompanyNews(SYMBOLS, FROM, TO);
 
 		for (int i = 0; i < 2; i++) {
 			assertResults(collection.collectList().block(TEST_TIMEOUT), "NVDA");
@@ -401,7 +401,7 @@ class FinnhubClientTests {
 	}
 
 	private List<NewsFetchResult> fetch() {
-		return client.fetchCompanyNews(FROM, TO).collectList().block(TEST_TIMEOUT);
+		return client.fetchCompanyNews(SYMBOLS, FROM, TO).collectList().block(TEST_TIMEOUT);
 	}
 
 	private FinnhubClient newClient(String apiKey, Duration timeout) {

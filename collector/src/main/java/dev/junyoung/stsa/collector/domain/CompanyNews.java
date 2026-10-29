@@ -1,4 +1,4 @@
-package dev.junyoung.stsa.collector.news.domain;
+package dev.junyoung.stsa.collector.domain;
 
 import java.util.List;
 

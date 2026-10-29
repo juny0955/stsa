@@ -1,4 +1,6 @@
-package dev.junyoung.stsa.collector.news.domain;
+package dev.junyoung.stsa.collector.news;
+
+import dev.junyoung.stsa.collector.domain.CompanyNews;
 
 public sealed interface NewsFetchResult {
 
