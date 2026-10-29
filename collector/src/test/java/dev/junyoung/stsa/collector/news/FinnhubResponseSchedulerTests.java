@@ -36,6 +36,7 @@ import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
@@ -156,7 +157,7 @@ class FinnhubResponseSchedulerTests {
 
 		new NewsScheduler(jobExecutionService, newsPersistenceService, client).collectNews();
 
-		verify(jobExecutionService).finish(startedExecution, 3, 0, null);
+		verify(jobExecutionService).finish(startedExecution, 3, 0, null, List.of());
 	}
 
 	@Test
@@ -169,7 +170,8 @@ class FinnhubResponseSchedulerTests {
 
 		new NewsScheduler(jobExecutionService, newsPersistenceService, client).collectNews();
 
-		verify(jobExecutionService).finish(startedExecution, 2, 1, null);
+		verify(jobExecutionService).finish(startedExecution, 2, 1, null,
+			List.of("NVDA 조회 실패: java.lang.IllegalStateException: 원인 예외"));
 	}
 
 	@Test
@@ -184,7 +186,10 @@ class FinnhubResponseSchedulerTests {
 
 		new NewsScheduler(jobExecutionService, newsPersistenceService, client).collectNews();
 
-		verify(jobExecutionService).finish(startedExecution, 0, 3, null);
+		verify(jobExecutionService).finish(startedExecution, 0, 3, null, List.of(
+			"NVDA 조회 실패: java.lang.IllegalStateException: 조회 실패",
+			"AAPL 조회 실패: java.lang.IllegalStateException: 조회 실패",
+			"MSFT 조회 실패: java.lang.IllegalStateException: 조회 실패"));
 	}
 
 	@Test
@@ -203,8 +208,10 @@ class FinnhubResponseSchedulerTests {
 		scheduler.collectNews();
 
 		var order = inOrder(jobExecutionService);
-		order.verify(jobExecutionService).finish(startedExecution, 1, 2, null);
-		order.verify(jobExecutionService).finish(startedExecution, 3, 0, null);
+		order.verify(jobExecutionService).finish(startedExecution, 1, 2, null, List.of(
+			"AAPL 조회 실패: java.lang.IllegalStateException: 조회 실패",
+			"MSFT 조회 실패: java.lang.IllegalStateException: 조회 실패"));
+		order.verify(jobExecutionService).finish(startedExecution, 3, 0, null, List.of());
 	}
 
 	@Test
@@ -224,13 +231,14 @@ class FinnhubResponseSchedulerTests {
 
 			assertThat(source.tryEmitNext(new NewsFetchResult.Failure("NVDA",
 					new IllegalStateException("조회 실패")))).isEqualTo(Sinks.EmitResult.OK);
-			verify(jobExecutionService, never()).finish(any(), anyInt(), anyInt(), any());
+			verify(jobExecutionService, never()).finish(any(), anyInt(), anyInt(), any(), anyList());
 			assertThat(execution.isDone()).isFalse();
 
 			assertThat(source.tryEmitNext(success("MSFT"))).isEqualTo(Sinks.EmitResult.OK);
 			assertThat(source.tryEmitComplete()).isEqualTo(Sinks.EmitResult.OK);
 			execution.get(TEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-			verify(jobExecutionService).finish(startedExecution, 2, 1, null);
+			verify(jobExecutionService).finish(startedExecution, 2, 1, null,
+				List.of("NVDA 조회 실패: java.lang.IllegalStateException: 조회 실패"));
 		}
 		finally {
 			source.tryEmitComplete();

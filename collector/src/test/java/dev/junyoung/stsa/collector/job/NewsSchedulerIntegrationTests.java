@@ -60,6 +60,7 @@ class NewsSchedulerIntegrationTests extends JobExecutionTestSupport {
 		assertThat(finished.getSuccessCount()).isEqualTo(3);
 		assertThat(finished.getFailureCount()).isZero();
 		assertThat(finished.getFinishedAt()).isNotNull();
+		assertThat(finished.getErrorMessage()).isNull();
 		assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
 	}
 
@@ -79,7 +80,7 @@ class NewsSchedulerIntegrationTests extends JobExecutionTestSupport {
 		assertThat(execution.getProcessedCount()).isEqualTo(3);
 		assertThat(execution.getSuccessCount()).isEqualTo(2);
 		assertThat(execution.getFailureCount()).isEqualTo(1);
-		assertThat(execution.getErrorMessage()).isNull();
+		assertThat(execution.getErrorMessage()).contains("NVDA", "저장 실패", "Stock must be registered");
 		assertThat(observer.fetchCount(NEWS_ARTICLE)).isEqualTo(2);
 		assertThat(observer.fetchCount(NEWS_ARTICLE_STOCK)).isEqualTo(2);
 		assertThat(observer.fetchCount(STOCK)).isEqualTo(2);
@@ -161,6 +162,69 @@ class NewsSchedulerIntegrationTests extends JobExecutionTestSupport {
 			executor.shutdownNow();
 			assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
 		}
+	}
+
+	@Test
+	@DisplayName("여러 종목의 조회 실패 원인을 모두 저장하고 부분 성공 상태를 유지한다")
+	void persistsAllFetchFailureMessages() {
+		registerStock("MSFT");
+		FinnhubClient client = mock(FinnhubClient.class);
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.just(
+			new NewsFetchResult.Failure("NVDA", new IllegalStateException("HTTP 429")),
+			new NewsFetchResult.Failure("AAPL", new IllegalStateException("Request timed out")),
+			response("MSFT", 103)));
+
+		new NewsScheduler(service, newsPersistenceService, client).collectNews();
+
+		var execution = observer.selectFrom(JOB_EXECUTION).fetchSingle();
+		assertThat(execution.getStatus()).isEqualTo("PARTIAL_SUCCESS");
+		assertThat(execution.getSuccessCount()).isEqualTo(1);
+		assertThat(execution.getFailureCount()).isEqualTo(2);
+		assertThat(execution.getErrorMessage()).contains("NVDA 조회 실패", "HTTP 429", "AAPL 조회 실패", "Request timed out");
+		assertThat(execution.getErrorMessage().lines()).hasSize(2);
+		assertThat(observer.fetchCount(NEWS_ARTICLE)).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("뉴스 저장 롤백 후에도 DB 오류와 다른 종목의 조회 오류를 실행 이력에 보존한다")
+	void persistsStorageAndFetchErrorsAfterNewsRollback() {
+		for (String symbol : List.of("NVDA", "AAPL", "MSFT")) {
+			registerStock(symbol);
+		}
+		FinnhubClient client = mock(FinnhubClient.class);
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.just(
+			new NewsFetchResult.Success(new CompanyNews("NVDA", List.of(NewsTestData.article(101, null)))),
+			response("AAPL", 102),
+			new NewsFetchResult.Failure("MSFT", new IllegalStateException("Timeout"))));
+
+		new NewsScheduler(service, newsPersistenceService, client).collectNews();
+
+		var execution = observer.selectFrom(JOB_EXECUTION).fetchSingle();
+		assertThat(execution.getStatus()).isEqualTo("PARTIAL_SUCCESS");
+		assertThat(execution.getSuccessCount()).isEqualTo(1);
+		assertThat(execution.getFailureCount()).isEqualTo(2);
+		assertThat(execution.getErrorMessage()).contains("NVDA 저장 실패", "headline", "MSFT 조회 실패", "Timeout");
+		assertThat(observer.selectFrom(NEWS_ARTICLE).fetchSingle().getExternalId()).isEqualTo("102");
+		assertThat(observer.fetchCount(NEWS_ARTICLE_STOCK)).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("종목별 실패 뒤 전체 실행 오류가 발생해도 두 원인을 함께 저장한다")
+	void retainsSymbolErrorsAlongsideExecutionError() {
+		registerStock("NVDA");
+		FinnhubClient client = mock(FinnhubClient.class);
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.concat(
+			Flux.just(new NewsFetchResult.Failure("AAPL", new IllegalStateException("HTTP failed")), response("NVDA", 101)),
+			Flux.error(new IllegalStateException("Stream stopped"))));
+
+		new NewsScheduler(service, newsPersistenceService, client).collectNews();
+
+		var execution = observer.selectFrom(JOB_EXECUTION).fetchSingle();
+		assertThat(execution.getStatus()).isEqualTo("FAILED");
+		assertThat(execution.getSuccessCount()).isEqualTo(1);
+		assertThat(execution.getFailureCount()).isEqualTo(1);
+		assertThat(execution.getErrorMessage()).contains("AAPL 조회 실패", "HTTP failed", "Stream stopped");
+		assertThat(observer.fetchCount(NEWS_ARTICLE)).isEqualTo(1);
 	}
 
 	private NewsFetchResult.Success response(String symbol, long articleId) {

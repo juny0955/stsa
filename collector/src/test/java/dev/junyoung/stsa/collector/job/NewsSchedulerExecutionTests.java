@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.doAnswer;
@@ -77,7 +78,7 @@ class NewsSchedulerExecutionTests {
 
 		scheduler.collectNews();
 
-		verify(service).finish(execution, 1, 0, cause);
+		verify(service).finish(execution, 1, 0, cause, List.of());
 	}
 
 	@Test
@@ -88,7 +89,8 @@ class NewsSchedulerExecutionTests {
 
 		scheduler.collectNews();
 
-		verify(service).finish(execution, 2, 1, null);
+		verify(service).finish(execution, 2, 1, null,
+			List.of("AAPL 조회 실패: java.lang.IllegalStateException: HTTP failed"));
 	}
 
 	@Test
@@ -98,7 +100,7 @@ class NewsSchedulerExecutionTests {
 
 		scheduler.collectNews();
 
-		verify(service).finish(execution, 0, 0, null);
+		verify(service).finish(execution, 0, 0, null, List.of());
 	}
 
 	@Test
@@ -107,11 +109,11 @@ class NewsSchedulerExecutionTests {
 		RuntimeException fetchError = new IllegalStateException("Fetch failed");
 		RuntimeException updateError = new IllegalStateException("Update failed");
 		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.error(fetchError));
-		doThrow(updateError).when(service).finish(execution, 0, 0, fetchError);
+		doThrow(updateError).when(service).finish(execution, 0, 0, fetchError, List.of());
 
 		assertThatCode(scheduler::collectNews).doesNotThrowAnyException();
 
-		verify(service).finish(execution, 0, 0, fetchError);
+		verify(service).finish(execution, 0, 0, fetchError, List.of());
 	}
 
 	@Test
@@ -122,14 +124,14 @@ class NewsSchedulerExecutionTests {
 		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(
 				Flux.just(success("NVDA"), success("AAPL"), success("MSFT")));
 		doThrow(new IllegalStateException("Update failed")).doNothing()
-				.when(service).finish(any(), anyInt(), anyInt(), isNull());
+				.when(service).finish(any(), anyInt(), anyInt(), isNull(), anyList());
 
 		scheduler.collectNews();
 		scheduler.collectNews();
 
 		verify(client, times(2)).fetchCompanyNews(any(), any(), any());
-		verify(service).finish(execution, 3, 0, null);
-		verify(service).finish(next, 3, 0, null);
+		verify(service).finish(execution, 3, 0, null, List.of());
+		verify(service).finish(next, 3, 0, null, List.of());
 	}
 
 	@Test
@@ -147,7 +149,8 @@ class NewsSchedulerExecutionTests {
 		order.verify(newsPersistenceService).save(nvda.news());
 		order.verify(newsPersistenceService).save(aapl.news());
 		order.verify(newsPersistenceService).save(msft.news());
-		verify(service).finish(execution, 2, 1, null);
+		verify(service).finish(execution, 2, 1, null,
+			List.of("NVDA 저장 실패: java.lang.IllegalStateException: Save failed"));
 	}
 
 	@Test
@@ -174,12 +177,12 @@ class NewsSchedulerExecutionTests {
 			assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
 			assertThat(savedOutsideEventLoop).isTrue();
 			assertThat(collecting.isDone()).isFalse();
-			verify(service, never()).finish(any(), anyInt(), anyInt(), any());
+			verify(service, never()).finish(any(), anyInt(), anyInt(), any(), anyList());
 
 			release.countDown();
 			collecting.get(5, TimeUnit.SECONDS);
 
-			verify(service).finish(execution, 1, 0, cause);
+			verify(service).finish(execution, 1, 0, cause, List.of());
 		} finally {
 			release.countDown();
 			collecting.cancel(true);

@@ -3,6 +3,8 @@ package dev.junyoung.stsa.collector.scheduler;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -37,6 +39,7 @@ public class NewsScheduler {
 		LocalDate today = LocalDate.now(ZoneOffset.UTC);
 		AtomicInteger succeeded = new AtomicInteger();
 		AtomicInteger failed = new AtomicInteger();
+		Queue<String> failureMessages = new ConcurrentLinkedQueue<>();
 		JobExecution execution;
 		try {
 			execution = jobExecutionService.start(JOB_NAME, SYMBOLS.size());
@@ -57,11 +60,13 @@ public class NewsScheduler {
 						})
 						.onErrorResume(RuntimeException.class, error -> {
 							failed.incrementAndGet();
+							failureMessages.add(success.symbol() + " 저장 실패: " + error);
 							log.error("Finnhub {} 뉴스 저장 실패", success.symbol(), error);
 							return Mono.empty();
 						});
 					case NewsFetchResult.Failure failure -> {
 						failed.incrementAndGet();
+						failureMessages.add(failure.symbol() + " 조회 실패: " + failure.cause());
 						log.error("Finnhub {} 뉴스 조회 실패", failure.symbol(), failure.cause());
 						yield Mono.<Void>empty();
 					}
@@ -73,7 +78,7 @@ public class NewsScheduler {
 			log.error("뉴스 조회 실패. 다음 주기에 다시 시도합니다.", e);
 		} finally {
 			try {
-				jobExecutionService.finish(execution, succeeded.get(), failed.get(), executionError);
+				jobExecutionService.finish(execution, succeeded.get(), failed.get(), executionError, List.copyOf(failureMessages));
 			} catch (RuntimeException e) {
 				log.error("뉴스 수집 실행 이력 갱신 실패: executionId={}", execution.getId(), e);
 			}

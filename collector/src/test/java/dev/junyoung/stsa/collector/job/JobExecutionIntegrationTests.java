@@ -2,11 +2,13 @@ package dev.junyoung.stsa.collector.job;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import dev.junyoung.stsa.collector.domain.JobStatus;
@@ -44,7 +46,7 @@ class JobExecutionIntegrationTests extends JobExecutionTestSupport {
 	void commitsFinalResult(int succeeded, int failed, JobStatus expected) {
 		var execution = service.start("News Collect", 3);
 
-		service.finish(execution, succeeded, failed, null);
+		service.finish(execution, succeeded, failed, null, List.of());
 
 		var saved = observer.selectFrom(JOB_EXECUTION).where(JOB_EXECUTION.ID.eq(execution.getId())).fetchSingle();
 		assertThat(saved.getStatus()).isEqualTo(expected.name());
@@ -57,7 +59,11 @@ class JobExecutionIntegrationTests extends JobExecutionTestSupport {
 		assertThat(saved.getFinishedAt()).isNotNull();
 		assertThat(saved.getFinishedAt().toInstant()).isAfterOrEqualTo(saved.getStartedAt().toInstant());
 		assertThat(saved.getUpdatedAt()).isEqualTo(saved.getFinishedAt());
-		assertThat(saved.getErrorMessage()).isNull();
+		if (succeeded + failed == execution.getProcessedCount()) {
+			assertThat(saved.getErrorMessage()).isNull();
+		} else {
+			assertThat(saved.getErrorMessage()).contains("응답 수 불일치", "대상 3종목");
+		}
 		assertThat(observer.fetchCount(JOB_EXECUTION)).isEqualTo(1);
 	}
 
@@ -67,7 +73,7 @@ class JobExecutionIntegrationTests extends JobExecutionTestSupport {
 	void failsOnExecutionErrorWithoutInventingMissingResults(int succeeded) {
 		var execution = service.start("News Collect", 3);
 
-		service.finish(execution, succeeded, 0, new IllegalStateException("Fetch failed"));
+		service.finish(execution, succeeded, 0, new IllegalStateException("Fetch failed"), List.of());
 
 		var saved = observer.selectFrom(JOB_EXECUTION).where(JOB_EXECUTION.ID.eq(execution.getId())).fetchSingle();
 		assertThat(saved.getStatus()).isEqualTo("FAILED");
@@ -77,11 +83,25 @@ class JobExecutionIntegrationTests extends JobExecutionTestSupport {
 		assertThat(saved.getErrorMessage()).isEqualTo("Fetch failed");
 	}
 
+	@ParameterizedTest
+	@NullAndEmptySource
+	@ValueSource(strings = {" "})
+	@DisplayName("전체 예외 메시지가 비어 있어도 예외 타입을 저장한다")
+	void persistsExceptionTypeWhenMessageIsMissing(String message) {
+		var execution = service.start("News Collect", 3);
+
+		service.finish(execution, 0, 0, new IllegalStateException(message), List.of());
+
+		var saved = observer.selectFrom(JOB_EXECUTION).where(JOB_EXECUTION.ID.eq(execution.getId())).fetchSingle();
+		assertThat(saved.getStatus()).isEqualTo("FAILED");
+		assertThat(saved.getErrorMessage()).isEqualTo(IllegalStateException.class.getName());
+	}
+
 	@Test
 	@DisplayName("수집을 반복하면 새로운 실행 행을 생성한다")
 	void createsDistinctRowsForEachRun() {
 		var first = service.start("News Collect", 3);
-		service.finish(first, 3, 0, null);
+		service.finish(first, 3, 0, null, List.of());
 
 		var second = service.start("News Collect", 3);
 
@@ -98,7 +118,7 @@ class JobExecutionIntegrationTests extends JobExecutionTestSupport {
 	void rejectsMissingExecutionUpdate() {
 		var execution = service.start("News Collect", 3);
 
-		assertThatThrownBy(() -> service.finish(execution.toBuilder().id(-1L).build(), 3, 0, null))
+		assertThatThrownBy(() -> service.finish(execution.toBuilder().id(-1L).build(), 3, 0, null, List.of()))
 				.isInstanceOf(IllegalStateException.class);
 		assertThat(observer.selectFrom(JOB_EXECUTION).where(JOB_EXECUTION.ID.eq(execution.getId())).fetchSingle()
 				.getStatus()).isEqualTo("RUNNING");
@@ -109,7 +129,7 @@ class JobExecutionIntegrationTests extends JobExecutionTestSupport {
 	void retainsCommittedStartWhenFinishFails() {
 		var execution = service.start("News Collect", 3);
 
-		assertThatThrownBy(() -> service.finish(execution, 4, 0, null))
+		assertThatThrownBy(() -> service.finish(execution, 4, 0, null, List.of()))
 				.hasMessageContaining("job_execution_count_ck");
 
 		var saved = observer.selectFrom(JOB_EXECUTION).where(JOB_EXECUTION.ID.eq(execution.getId())).fetchSingle();

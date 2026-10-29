@@ -2,6 +2,8 @@ package dev.junyoung.stsa.collector.service;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.StringJoiner;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,7 +29,8 @@ public class JobExecutionService {
 	}
 
 	@Transactional
-	public void finish(JobExecution execution, int successCount, int failureCount, Throwable executionError) {
+	public void finish(JobExecution execution, int successCount, int failureCount,
+			Throwable executionError, List<String> failureMessages) {
 		JobStatus status;
 		if (executionError != null || successCount + failureCount != execution.getProcessedCount()) {
 			status = JobStatus.FAILED;
@@ -39,12 +42,22 @@ public class JobExecutionService {
 			status = JobStatus.FAILED;
 		}
 
+		StringJoiner errors = new StringJoiner("\n");
+		failureMessages.forEach(errors::add);
+		if (executionError != null) {
+			String message = executionError.getMessage();
+			errors.add(message == null || message.isBlank() ? executionError.getClass().getName() : message);
+		} else if (successCount + failureCount != execution.getProcessedCount()) {
+			errors.add("응답 수 불일치: 대상 %d종목, 성공 %d종목, 실패 %d종목"
+				.formatted(execution.getProcessedCount(), successCount, failureCount));
+		}
+
 		OffsetDateTime finishedAt = OffsetDateTime.now(ZoneOffset.UTC);
 		jobExecutionRepository.update(execution.toBuilder()
 			.status(status)
 			.successCount(successCount)
 			.failureCount(failureCount)
-			.errorMessage(executionError == null ? null : executionError.getMessage())
+			.errorMessage(errors.length() == 0 ? null : errors.toString())
 			.finishedAt(finishedAt)
 			.updatedAt(finishedAt)
 			.build());
