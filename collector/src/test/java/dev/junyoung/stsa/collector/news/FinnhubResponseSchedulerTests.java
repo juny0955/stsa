@@ -3,16 +3,13 @@ package dev.junyoung.stsa.collector.news;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,18 +19,16 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.scheduling.config.FixedRateTask;
-import org.slf4j.LoggerFactory;
+import org.springframework.test.util.ReflectionTestUtils;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.classic.spi.ThrowableProxy;
-import ch.qos.logback.core.read.ListAppender;
+import dev.junyoung.stsa.collector.domain.JobStatus;
 import dev.junyoung.stsa.collector.news.client.FinnhubClient;
-import dev.junyoung.stsa.collector.news.domain.CompanyNews;
-import dev.junyoung.stsa.collector.news.domain.NewsFetchResult;
+import dev.junyoung.stsa.collector.domain.CompanyNews;
+import dev.junyoung.stsa.collector.domain.JobExecution;
+import dev.junyoung.stsa.collector.service.JobExecutionService;
+import dev.junyoung.stsa.collector.service.NewsPersistenceService;
 import dev.junyoung.stsa.collector.news.client.dto.FinnhubResponse;
-import dev.junyoung.stsa.collector.news.scheduler.NewsScheduler;
+import dev.junyoung.stsa.collector.scheduler.NewsScheduler;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
@@ -41,8 +36,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -52,26 +53,20 @@ class FinnhubResponseSchedulerTests {
 
 	private static final Duration TEST_TIMEOUT = Duration.ofSeconds(5);
 
-	private Logger logger;
-	private Level previousLogLevel;
-	private ListAppender<ILoggingEvent> logAppender;
+	private JobExecutionService jobExecutionService;
+	private NewsPersistenceService newsPersistenceService;
+	private JobExecution startedExecution;
 
 	@BeforeEach
 	void setUp() {
-		logger = (Logger)LoggerFactory.getLogger(NewsScheduler.class);
-		previousLogLevel = logger.getLevel();
-		logger.setLevel(Level.INFO);
-		logAppender = new ListAppender<>();
-		logAppender.list = new CopyOnWriteArrayList<>();
-		logAppender.start();
-		logger.addAppender(logAppender);
-	}
-
-	@AfterEach
-	void tearDown() {
-		logger.detachAppender(logAppender);
-		logAppender.stop();
-		logger.setLevel(previousLogLevel);
+		jobExecutionService = mock(JobExecutionService.class);
+		newsPersistenceService = mock(NewsPersistenceService.class);
+		startedExecution = JobExecution.builder()
+				.jobName("News Collect")
+				.processedCount(3)
+				.status(JobStatus.RUNNING)
+				.build();
+		when(jobExecutionService.start(anyString(), anyInt())).thenReturn(startedExecution);
 	}
 
 	@Test
@@ -79,7 +74,7 @@ class FinnhubResponseSchedulerTests {
 	void startsImmediatelyAndUsesThirtyMinuteIntervalByDefault() {
 		FinnhubClient client = mock(FinnhubClient.class);
 		AtomicInteger subscriptions = new AtomicInteger();
-		when(client.fetchCompanyNews(any(), any())).thenReturn(Flux.defer(() -> {
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.defer(() -> {
 			subscriptions.incrementAndGet();
 			return Flux.just(success("NVDA"));
 		}));
@@ -90,6 +85,7 @@ class FinnhubResponseSchedulerTests {
 			await().atMost(Duration.ofSeconds(5)).until(() -> subscriptions.get() == 1);
 			LocalDate after = LocalDate.now(ZoneOffset.UTC);
 			verify(client).fetchCompanyNews(
+					eq(List.of("NVDA", "AAPL", "MSFT")),
 					argThat(from ->
 						from.equals(before.minusDays(1)) || from.equals(after.minusDays(1))),
 					argThat(to -> to.equals(before) || to.equals(after)));
@@ -104,11 +100,24 @@ class FinnhubResponseSchedulerTests {
 	}
 
 	@Test
+	@DisplayName("설정한 수집 실행 제한 시간을 스케줄러에 적용한다")
+	void appliesConfiguredExecutionTimeout() {
+		FinnhubClient client = mock(FinnhubClient.class);
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.empty());
+
+		contextRunner(client).withPropertyValues("finnhub.news.execution-timeout-ms=1234").run(context -> {
+			assertThat(context).hasNotFailed();
+			assertThat(ReflectionTestUtils.getField(context.getBean(NewsScheduler.class), "executionTimeoutMillis"))
+				.isEqualTo(1234L);
+		});
+	}
+
+	@Test
 	@DisplayName("설정한 주기마다 뉴스 조회를 다시 구독한다")
 	void subscribesAgainOnEachScheduledExecution() {
 		FinnhubClient client = mock(FinnhubClient.class);
 		AtomicInteger subscriptions = new AtomicInteger();
-		when(client.fetchCompanyNews(any(), any())).thenReturn(Flux.defer(() -> {
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.defer(() -> {
 			subscriptions.incrementAndGet();
 			return Flux.empty();
 		}));
@@ -116,7 +125,7 @@ class FinnhubResponseSchedulerTests {
 		contextRunner(client).withPropertyValues("finnhub.news.interval=PT0.05S").run(context -> {
 			assertThat(context).hasNotFailed();
 			await().atMost(Duration.ofSeconds(5)).until(() -> subscriptions.get() >= 2);
-			verify(client, atLeast(2)).fetchCompanyNews(any(), any());
+			verify(client, atLeast(2)).fetchCompanyNews(any(), any(), any());
 		});
 	}
 
@@ -125,7 +134,7 @@ class FinnhubResponseSchedulerTests {
 	void continuesScheduledExecutionAfterAnError() {
 		FinnhubClient client = mock(FinnhubClient.class);
 		AtomicInteger successfulSubscriptions = new AtomicInteger();
-		when(client.fetchCompanyNews(any(), any()))
+		when(client.fetchCompanyNews(any(), any(), any()))
 				.thenReturn(Flux.error(new IllegalStateException("Temporary test failure")))
 				.thenReturn(Flux.defer(() -> {
 					successfulSubscriptions.incrementAndGet();
@@ -135,7 +144,7 @@ class FinnhubResponseSchedulerTests {
 		contextRunner(client).withPropertyValues("finnhub.news.interval=PT0.05S").run(context -> {
 			assertThat(context).hasNotFailed();
 			await().atMost(Duration.ofSeconds(5)).until(() -> successfulSubscriptions.get() >= 1);
-			verify(client, atLeast(2)).fetchCompanyNews(any(), any());
+			verify(client, atLeast(2)).fetchCompanyNews(any(), any(), any());
 		});
 	}
 
@@ -151,57 +160,50 @@ class FinnhubResponseSchedulerTests {
 	}
 
 	@Test
-	@DisplayName("빈 뉴스 목록도 성공으로 집계하고 실제 기사 수와 최종 건수를 기록한다")
-	void logsSuccessfulResultsAndSummary() {
+	@DisplayName("빈 뉴스 목록도 성공 종목으로 집계한다")
+	void countsEmptyNewsListsAsSuccessfulSymbols() {
 		FinnhubClient client = mock(FinnhubClient.class);
 		FinnhubResponse article = new FinnhubResponse(1L, "company", 1793059200L, "뉴스 제목",
 				"", "NVDA", "Example News", "요약", "https://example.com/news");
-		when(client.fetchCompanyNews(any(), any())).thenReturn(Flux.just(
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.just(
 				new NewsFetchResult.Success(new CompanyNews("NVDA", List.of(article))),
 				success("AAPL"), success("MSFT")));
 
-		new NewsScheduler(client).collectNews();
+		new NewsScheduler(jobExecutionService, newsPersistenceService, client).collectNews();
 
-		assertThat(logAppender.list).extracting(ILoggingEvent::getFormattedMessage).containsExactly(
-				"NVDA 뉴스 1건 조회 완료", "AAPL 뉴스 0건 조회 완료", "MSFT 뉴스 0건 조회 완료",
-				"Finnhub 뉴스 수집 완료: 성공 3종목, 실패 0종목");
-		assertErrors();
+		verify(jobExecutionService).finish(startedExecution, 3, 0, null, List.of());
 	}
 
 	@Test
-	@DisplayName("성공과 실패를 받은 순서대로 기록하고 원본 예외를 보존한다")
-	void logsMixedResultsAndOriginalException() {
+	@DisplayName("성공과 실패 종목 수를 종료 처리에 전달한다")
+	void countsMixedResults() {
 		FinnhubClient client = mock(FinnhubClient.class);
 		RuntimeException cause = new IllegalStateException("원인 예외");
-		when(client.fetchCompanyNews(any(), any())).thenReturn(Flux.just(
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.just(
 				success("AAPL"), new NewsFetchResult.Failure("NVDA", cause), success("MSFT")));
 
-		new NewsScheduler(client).collectNews();
+		new NewsScheduler(jobExecutionService, newsPersistenceService, client).collectNews();
 
-		assertThat(logAppender.list).extracting(ILoggingEvent::getFormattedMessage).containsExactly(
-				"AAPL 뉴스 0건 조회 완료", failureMessage("NVDA"), "MSFT 뉴스 0건 조회 완료",
-				"Finnhub 뉴스 수집 완료: 성공 2종목, 실패 1종목");
-		assertErrors("NVDA");
-		assertThat(errorLogs().getFirst().getThrowableProxy()).isInstanceOfSatisfying(ThrowableProxy.class,
-				proxy -> assertThat(proxy.getThrowable()).isSameAs(cause));
+		verify(jobExecutionService).finish(startedExecution, 2, 1, null,
+			List.of("NVDA 조회 실패: java.lang.IllegalStateException: 원인 예외"));
 	}
 
 	@Test
-	@DisplayName("모든 종목이 실패하면 오류를 종목마다 한 번 기록하고 성공 0건과 실패 3건을 집계한다")
-	void logsAllFailuresAndSummary() {
+	@DisplayName("모든 종목이 실패하면 성공 0건과 실패 3건을 전달한다")
+	void countsAllFailures() {
 		FinnhubClient client = mock(FinnhubClient.class);
 		RuntimeException cause = new IllegalStateException("조회 실패");
-		when(client.fetchCompanyNews(any(), any())).thenReturn(Flux.just(
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.just(
 				new NewsFetchResult.Failure("NVDA", cause),
 				new NewsFetchResult.Failure("AAPL", cause),
 				new NewsFetchResult.Failure("MSFT", cause)));
 
-		new NewsScheduler(client).collectNews();
+		new NewsScheduler(jobExecutionService, newsPersistenceService, client).collectNews();
 
-		assertErrors("NVDA", "AAPL", "MSFT");
-		assertThat(summaryLogs()).extracting(ILoggingEvent::getFormattedMessage)
-				.containsExactly("Finnhub 뉴스 수집 완료: 성공 0종목, 실패 3종목");
-		assertThat(logAppender.list).hasSize(4);
+		verify(jobExecutionService).finish(startedExecution, 0, 3, null, List.of(
+			"NVDA 조회 실패: java.lang.IllegalStateException: 조회 실패",
+			"AAPL 조회 실패: java.lang.IllegalStateException: 조회 실패",
+			"MSFT 조회 실패: java.lang.IllegalStateException: 조회 실패"));
 	}
 
 	@Test
@@ -209,52 +211,48 @@ class FinnhubResponseSchedulerTests {
 	void resetsCountsOnEachExecution() {
 		FinnhubClient client = mock(FinnhubClient.class);
 		RuntimeException cause = new IllegalStateException("조회 실패");
-		when(client.fetchCompanyNews(any(), any()))
+		when(client.fetchCompanyNews(any(), any(), any()))
 				.thenReturn(Flux.just(success("NVDA"),
 						new NewsFetchResult.Failure("AAPL", cause),
 						new NewsFetchResult.Failure("MSFT", cause)))
 				.thenReturn(Flux.just(success("NVDA"), success("AAPL"), success("MSFT")));
-		NewsScheduler scheduler = new NewsScheduler(client);
+		NewsScheduler scheduler = new NewsScheduler(jobExecutionService, newsPersistenceService, client);
 
 		scheduler.collectNews();
 		scheduler.collectNews();
 
-		assertThat(summaryLogs()).extracting(ILoggingEvent::getFormattedMessage).containsExactly(
-				"Finnhub 뉴스 수집 완료: 성공 1종목, 실패 2종목",
-				"Finnhub 뉴스 수집 완료: 성공 3종목, 실패 0종목");
-		assertErrors("AAPL", "MSFT");
+		var order = inOrder(jobExecutionService);
+		order.verify(jobExecutionService).finish(startedExecution, 1, 2, null, List.of(
+			"AAPL 조회 실패: java.lang.IllegalStateException: 조회 실패",
+			"MSFT 조회 실패: java.lang.IllegalStateException: 조회 실패"));
+		order.verify(jobExecutionService).finish(startedExecution, 3, 0, null, List.of());
 	}
 
 	@Test
-	@DisplayName("전체 완료를 기다리지 않고 성공과 실패를 도착 즉시 처리한다")
-	void handlesResultsBeforeCollectionCompletes() throws Exception {
+	@DisplayName("응답 스트림이 완료될 때까지 실행을 종료하지 않고 완료 후 집계 결과를 전달한다")
+	void finishesOnlyAfterStreamCompletes() throws Exception {
 		FinnhubClient client = mock(FinnhubClient.class);
 		Sinks.Many<NewsFetchResult> source = Sinks.many().unicast().onBackpressureBuffer();
-		when(client.fetchCompanyNews(any(), any())).thenReturn(source.asFlux());
-		NewsScheduler scheduler = new NewsScheduler(client);
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(source.asFlux());
+		NewsScheduler scheduler = new NewsScheduler(jobExecutionService, newsPersistenceService, client);
 		ExecutorService executor = Executors.newSingleThreadExecutor();
 		Future<?> execution = executor.submit(scheduler::collectNews);
 
 		try {
 			await().atMost(TEST_TIMEOUT).until(() -> source.currentSubscriberCount() == 1);
 			assertThat(source.tryEmitNext(success("AAPL"))).isEqualTo(Sinks.EmitResult.OK);
-			await().atMost(TEST_TIMEOUT).untilAsserted(() ->
-					assertThat(logAppender.list).extracting(ILoggingEvent::getFormattedMessage)
-							.containsExactly("AAPL 뉴스 0건 조회 완료"));
 			assertThat(execution.isDone()).isFalse();
 
 			assertThat(source.tryEmitNext(new NewsFetchResult.Failure("NVDA",
 					new IllegalStateException("조회 실패")))).isEqualTo(Sinks.EmitResult.OK);
-			await().atMost(TEST_TIMEOUT).untilAsserted(() -> assertErrors("NVDA"));
-			assertThat(summaryLogs()).isEmpty();
+			verify(jobExecutionService, never()).finish(any(), anyInt(), anyInt(), any(), anyList());
 			assertThat(execution.isDone()).isFalse();
 
 			assertThat(source.tryEmitNext(success("MSFT"))).isEqualTo(Sinks.EmitResult.OK);
 			assertThat(source.tryEmitComplete()).isEqualTo(Sinks.EmitResult.OK);
 			execution.get(TEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-			assertThat(summaryLogs()).extracting(ILoggingEvent::getFormattedMessage)
-					.containsExactly("Finnhub 뉴스 수집 완료: 성공 2종목, 실패 1종목");
-			assertErrors("NVDA");
+			verify(jobExecutionService).finish(startedExecution, 2, 1, null,
+				List.of("NVDA 조회 실패: java.lang.IllegalStateException: 조회 실패"));
 		}
 		finally {
 			source.tryEmitComplete();
@@ -268,28 +266,11 @@ class FinnhubResponseSchedulerTests {
 		return new NewsFetchResult.Success(new CompanyNews(symbol, List.of()));
 	}
 
-	private List<ILoggingEvent> summaryLogs() {
-		return logAppender.list.stream().filter(event -> event.getLevel() == Level.INFO
-				&& event.getFormattedMessage().startsWith("Finnhub 뉴스 수집 완료:")).toList();
-	}
-
-	private List<ILoggingEvent> errorLogs() {
-		return logAppender.list.stream().filter(event -> event.getLevel() == Level.ERROR).toList();
-	}
-
-	private String failureMessage(String symbol) {
-		return "Finnhub " + symbol + " 뉴스 조회 실패";
-	}
-
-	private void assertErrors(String... symbols) {
-		assertThat(errorLogs()).extracting(ILoggingEvent::getFormattedMessage).containsExactlyInAnyOrder(
-				Arrays.stream(symbols).map(this::failureMessage).toArray(String[]::new));
-		assertThat(errorLogs()).allSatisfy(event -> assertThat(event.getThrowableProxy()).isNotNull());
-	}
-
 	private ApplicationContextRunner contextRunner(FinnhubClient client) {
 		return new ApplicationContextRunner()
 				.withUserConfiguration(SchedulingConfiguration.class)
+				.withBean(JobExecutionService.class, () -> jobExecutionService)
+				.withBean(NewsPersistenceService.class, () -> newsPersistenceService)
 				.withBean(FinnhubClient.class, () -> client);
 	}
 
