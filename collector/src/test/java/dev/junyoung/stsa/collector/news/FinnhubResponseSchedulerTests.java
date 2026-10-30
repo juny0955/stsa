@@ -19,6 +19,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.scheduling.config.FixedRateTask;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import dev.junyoung.stsa.collector.domain.JobStatus;
 import dev.junyoung.stsa.collector.news.client.FinnhubClient;
@@ -95,6 +96,19 @@ class FinnhubResponseSchedulerTests {
 					assertThat(fixedRate.getInitialDelayDuration()).isEqualTo(Duration.ZERO);
 				});
 			});
+		});
+	}
+
+	@Test
+	@DisplayName("설정한 수집 실행 제한 시간을 스케줄러에 적용한다")
+	void appliesConfiguredExecutionTimeout() {
+		FinnhubClient client = mock(FinnhubClient.class);
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.empty());
+
+		contextRunner(client).withPropertyValues("finnhub.news.execution-timeout-ms=1234").run(context -> {
+			assertThat(context).hasNotFailed();
+			assertThat(ReflectionTestUtils.getField(context.getBean(NewsScheduler.class), "executionTimeoutMillis"))
+				.isEqualTo(1234L);
 		});
 	}
 

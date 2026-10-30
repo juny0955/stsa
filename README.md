@@ -27,3 +27,7 @@ Java 27을 사용한다. 일반 빌드에는 DB 접속이 필요하지 않으며
 기존 기사의 내용과 수정 시각은 유지하고 종목 연결만 중복 없이 추가한다.
 뉴스 저장이 커밋된 종목만 실행 이력의 성공 건수로 집계한다.
 종목별 조회·저장 실패는 종목명과 오류 원인을 `job_execution.error_message`에 함께 저장하며, 전체 실행 예외도 보존한다.
+
+수집 스트림의 실행 제한은 기본 5분이며 `finnhub.news.execution-timeout-ms`로 조정할 수 있다.
+기본 PostgreSQL URL의 `socketTimeout=30`은 소켓 읽기당 30초 제한이다. `spring.datasource.url`을 별도로 설정할 때도 필요한 `socketTimeout`을 포함해야 한다.
+실행 제한에 도달하면 진행 중인 JDBC 저장이 즉시 중단되지 않을 수 있으며, 종료 이력은 제한 시점까지 확인된 결과를 반영한다.

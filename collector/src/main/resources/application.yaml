@@ -4,7 +4,7 @@ spring:
   application:
     name: collector
   datasource:
-    url: jdbc:postgresql://localhost:5432/stsa
+    url: jdbc:postgresql://localhost:5432/stsa?socketTimeout=30
     username: postgres
     password: postgres
 
@@ -18,3 +18,5 @@ finnhub:
   api-key: ${FINNHUB_API_KEY:}
   base-url: https://finnhub.io/api/v1
   request-timeout: 10s
+  news:
+    execution-timeout-ms: 300000

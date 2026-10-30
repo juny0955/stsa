@@ -1,5 +1,6 @@
 package dev.junyoung.stsa.collector.scheduler;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -7,6 +8,7 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -33,6 +35,9 @@ public class NewsScheduler {
 	private final JobExecutionService jobExecutionService;
 	private final NewsPersistenceService newsPersistenceService;
 	private final FinnhubClient client;
+
+	@Value("${finnhub.news.execution-timeout-ms:300000}")
+	private long executionTimeoutMillis = 300_000;
 
 	@Scheduled(fixedRateString = "${finnhub.news.interval:PT30M}", initialDelay = 0)
 	public void collectNews() {
@@ -72,7 +77,7 @@ public class NewsScheduler {
 					}
 				}, true, 1)
 				.doOnComplete(() -> log.info("Finnhub 뉴스 수집 완료: 성공 {}종목, 실패 {}종목", succeeded.get(), failed.get()))
-				.blockLast();
+				.blockLast(Duration.ofMillis(executionTimeoutMillis));
 		} catch (RuntimeException e) {
 			executionError = e;
 			log.error("뉴스 조회 실패. 다음 주기에 다시 시도합니다.", e);

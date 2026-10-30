@@ -4,11 +4,14 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 import dev.junyoung.stsa.collector.domain.CompanyNews;
 import dev.junyoung.stsa.collector.domain.JobExecution;
 import dev.junyoung.stsa.collector.domain.JobStatus;
@@ -25,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.doAnswer;
@@ -151,6 +155,65 @@ class NewsSchedulerExecutionTests {
 		order.verify(newsPersistenceService).save(msft.news());
 		verify(service).finish(execution, 2, 1, null,
 			List.of("NVDA 저장 실패: java.lang.IllegalStateException: Save failed"));
+	}
+
+	@Test
+	@DisplayName("실행 시간 초과 시 수집을 취소하고 기존 집계와 오류를 종료 처리에 전달한다")
+	void finishesWithObservedCountsAndTimeout() {
+		ReflectionTestUtils.setField(scheduler, "executionTimeoutMillis", 100L);
+		AtomicBoolean cancelled = new AtomicBoolean();
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.concat(
+			Flux.just(new NewsFetchResult.Failure("NVDA", new IllegalStateException("HTTP failed"))),
+			Flux.<NewsFetchResult>never().doOnCancel(() -> cancelled.set(true))));
+
+		assertThatCode(scheduler::collectNews).doesNotThrowAnyException();
+
+		ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+		verify(service).finish(eq(execution), eq(0),
+			eq(1), error.capture(),
+			eq(List.of("NVDA 조회 실패: java.lang.IllegalStateException: HTTP failed")));
+		assertThat(error.getValue()).hasCauseInstanceOf(TimeoutException.class);
+		assertThat(cancelled).isTrue();
+	}
+
+	@Test
+	@DisplayName("저장 작업이 인터럽트에 반응하지 않아도 실행 제한 후 종료 처리한다")
+	void finishesOnTimeoutWhileStorageIsStillRunning() throws Exception {
+		ReflectionTestUtils.setField(scheduler, "executionTimeoutMillis", 2_000L);
+		var result = success("NVDA");
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		CountDownLatch storageFinished = new CountDownLatch(1);
+		doAnswer(invocation -> {
+			entered.countDown();
+			while (true) {
+				try {
+					release.await();
+					break;
+				} catch (InterruptedException ignored) {
+					// JDBC drivers may not stop an in-flight call on interruption.
+				}
+			}
+			storageFinished.countDown();
+			return null;
+		}).when(newsPersistenceService).save(result.news());
+		when(client.fetchCompanyNews(any(), any(), any())).thenReturn(Flux.just(result));
+		var executor = Executors.newSingleThreadExecutor();
+		var collecting = executor.submit(scheduler::collectNews);
+		try {
+			assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+			collecting.get(5, TimeUnit.SECONDS);
+			assertThat(storageFinished.getCount()).isEqualTo(1);
+			ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+			verify(service).finish(eq(execution), eq(0), eq(0), error.capture(), eq(List.of()));
+			assertThat(error.getValue()).hasCauseInstanceOf(TimeoutException.class);
+		} finally {
+			release.countDown();
+			collecting.cancel(true);
+			executor.shutdownNow();
+			assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+			assertThat(storageFinished.await(5, TimeUnit.SECONDS)).isTrue();
+		}
 	}
 
 	@Test
